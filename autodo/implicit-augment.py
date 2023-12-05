@@ -15,7 +15,7 @@ from custom_models import *
 from custom_datasets import *
 from custom_transforms import *
 from utils import *
-
+from custom_models.automodels import ValLossModel
 
 def get_args():
     parser = argparse.ArgumentParser(description='AutoDO using Implicit Differentiation')
@@ -197,6 +197,7 @@ def main(args):
         num_channels = 3
         extra_svhn = True if 'extra' in dataset else False
         hyperEpochStart = 50
+        
         # data:
         test_data = SVHN(save_folder, split='test',  transform=transform_test_svhn, download=True)
         if args.aug_model == 'RAND': # full RandAugment
@@ -403,7 +404,7 @@ def main(args):
     print('Test/Valid/Train Split: {}/{}/{} out of total {} train images'.format(L,M,N,T))
     # validation data loss/augmentation model
     if hyper_est:
-        validLosModel = LossModel(N=1, C=num_classes, init_targets=list(), apply=False, model='NONE', grad=False, sym=False, device=device).to(device)
+        validLosModel = ValLossModel(N=1, C=num_classes, init_targets=list(), apply=False, model='NONE', grad=False, sym=False, device=device).to(device)
         validAugModel = AugmentModel(N=1, magn=aug_M, apply=False, mode=aug_mode, grad=False, device=device).to(device)
     # train data loss/augmentation models
     symmetricKlEnable = False if (imbalance_ratio == 1) and (noise_ratio == 0.0) else True
@@ -451,11 +452,12 @@ def main(args):
         print('Run {}/{} - {}: {:.0f}% ({}/{})'.format(model_folder, run_name, run_date, 100.0*epoch/args.epochs, epoch, args.epochs))
         adjust_learning_rate(args, optimizer, epoch)
         testEnable  = True #if  (epoch >= hyperEpochStart) else False
-        hyperEnable = True if ((epoch >  hyperEpochStart) and hyperGradEnable)  else False
+        hyperEnable = True if ((epoch >  hyperEpochStart) and hyperGradEnable)  else False #TODO change it to False
         if not(hyper_est): # train classifier only
             train_loss = classTrain(args, encoder, decoder, optimizer, device, train_loader, epoch, trainLosModel, trainAugModel)
         else:
             # train hyperparameters
+            print(hyper_opt)
             if hyper_opt == 'HES' and hyperEnable:
                 print("START TRAINING HYPERPARAMETERS")
                 hyper_adjust_learning_rate(args, hyperOptimizer, epoch-hyperEpochStart)
