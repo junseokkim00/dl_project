@@ -1,0 +1,10 @@
+# pip3 install -U -r requirements.txt
+numpy
+scipy
+scikit-learn
+matplotlib
+tensorboard
+torch >= 1.10.2
+torchvision >= 0.7.0
+kornia == 0.4.1
+tqdm
