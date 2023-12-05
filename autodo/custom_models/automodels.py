@@ -309,6 +309,20 @@ class NTXentLoss(MemoryBankModule):
         loss = self.cross_entropy(logits, labels)
 
         return loss
+      
+class ValLossModel(nn.Module):
+    def __init__(self, N, C, init_targets, apply, model, grad, sym, device):
+        super().__init__()
+
+        dim_mlp = 10 #TODO change 
+        fc = nn.Linear(dim_mlp, 4)
+        if True:
+            fc = nn.Sequential(nn.Linear(dim_mlp, dim_mlp), nn.ReLU(), fc)
+        self.head = fc
+
+    def forward(self, idx, logit, target):
+        criterion = nn.CrossEntropyLoss().cuda()
+        return criterion(logit, target)
 
 class AugmentModelNONE(nn.Module):
     def __init__(self):
@@ -433,6 +447,8 @@ class AugmentModel(nn.Module):
 
 def hyperHesTrain(args, encoder, decoder, optimizer, device, valid_loader, train_loader, epoch, start,
         trainLosModel, trainAugModel, validLosModel, validAugModel, hyperOptimizer):
+    print(encoder)
+    print("HYPERHESTRAIN start")
     encoder.eval()
     decoder.eval()
     validLosModel.eval()
@@ -456,10 +472,16 @@ def hyperHesTrain(args, encoder, decoder, optimizer, device, valid_loader, train
         if p.requires_grad:
             hyperParams.append(p)
     theta = list()
+    # _theta = list()
     for n,p in decoder.named_parameters():
         if (len(args.hyper_theta) == 0) or (any([e in n for e in args.hyper_theta]) and ('.weight' in n)):
             theta.append(p)
-    #
+    
+    # _decoder = validLosModel.head
+    # for n,p in _decoder.named_parameters(): 
+    #     _theta.append(p)
+
+    
     batch_time = AverageMeter()
     data_time  = AverageMeter()
     v0Norms    = AverageMeter()
@@ -484,19 +506,58 @@ def hyperHesTrain(args, encoder, decoder, optimizer, device, valid_loader, train
         tData  = tData.to(device)
         tTarget= tTarget.to(device)
         tIndex = tIndex.to(device)
+
+        print(f'tData.shape: {tData.shape}, tTarget.shape: {tTarget.shape}, tIndex.shape: {tIndex.shape}')
+        print(f'vData.shape: {vData.shape}, vTarget.shape: {vTarget.shape}, vIndex.shape: {vIndex.shape}')
+        
         vData  = vData.to(device)
         vTarget= vTarget.to(device)
         vIndex = vIndex.to(device)
+        
+        
+        n_rot_images = 4*vData.shape[0]
+        use_images = vData
+        nimages = vData.shape[0]
+        rotated_images = torch.zeros([n_rot_images, use_images.shape[1], use_images.shape[2], use_images.shape[3]]).cuda()
+        rot_classes = torch.zeros([n_rot_images]).long().cuda()
+
+        rotated_images[:nimages] = use_images
+        # rotate 90
+        rotated_images[nimages:2*nimages] = use_images.flip(3).transpose(2,3)
+        rot_classes[nimages:2*nimages] = 1
+        # rotate 180
+        rotated_images[2*nimages:3*nimages] = use_images.flip(3).flip(2)
+        rot_classes[2*nimages:3*nimages] = 2
+        # rotate 270
+        rotated_images[3*nimages:4*nimages] = use_images.transpose(2,3).flip(3)
+        rot_classes[3*nimages:4*nimages] = 3
+
+        vTarget = rot_classes.to(device)
+        # output = model(head="rotnet", im_q=rotated_images)
+        # rot_loss = criterion(output, target)
+        
+        
         # measure data loading time
         data_time.update(time.time() - end)
         # warm-up learning rate
         hyper_lr = hyper_warmup_learning_rate(args, epoch-start, batch_idx, B, hyperOptimizer)
         # v1 = dL_v / dTheta: Lx1
         optimizer.zero_grad()
-        vData = validAugModel(vIndex, vData)
-        vEncode = encoder(vData)
+        # vData = validAugModel(vIndex, vData)
+        vEncode = encoder(rotated_images)
         vOutput = decoder(vEncode)
+        print(f'vEncode.shape: {vEncode.shape}')
+    
+        # print(f'vOutput.shape: {vOutput[0].shape}')
+        # validLosModel.set_fuck(vEncode.shape[1])
+
+        vOutput = validLosModel.head(vOutput[0])
         vLoss = validLosModel(vIndex, vOutput, vTarget)
+        print(vLoss)
+        
+
+        ## raise prev part
+
         g1 = torch.autograd.grad(vLoss, theta)
         v1 = [e.detach().clone() for e in g1]
         # v0 = dL_t / dTheta: Lx1
